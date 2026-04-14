@@ -1,0 +1,4 @@
+streamlit
+pymysql
+psycopg2-binary
+pandas
