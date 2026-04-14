@@ -22,6 +22,7 @@ TYPE_MAPPING = {
     'varchar': 'varchar',
     'char': 'char',
     'text': 'text',
+    'longtext': 'text',
     'boolean': 'boolean',
     'date': 'date',
     'time': 'time'
@@ -201,11 +202,15 @@ def create_gaussdb_table(host: str, port: int, user: str, password: str, db: str
             mysql_type = field['Type']
             # 提取基本类型（去掉长度等信息）
             base_type = mysql_type.split('(')[0].lower()
-            # 转换为GaussDB类型
-            gauss_type = TYPE_MAPPING.get(base_type, base_type)
-            # 保留长度信息（如果有）
-            if '(' in mysql_type:
-                gauss_type += mysql_type[mysql_type.find('('):]
+            # 特殊处理tinyint(1)，转换为boolean
+            if base_type == 'tinyint' and '(1)' in mysql_type:
+                gauss_type = 'boolean'
+            else:
+                # 转换为GaussDB类型
+                gauss_type = TYPE_MAPPING.get(base_type, base_type)
+                # 保留长度信息（如果有）
+                if '(' in mysql_type:
+                    gauss_type += mysql_type[mysql_type.find('('):]
             
             # 构建列定义
             column_def = f"{field['Field']} {gauss_type}"
@@ -380,6 +385,94 @@ def get_table_row_count(host: str, port: int, user: str, password: str, db: str,
     return count
 
 
+def get_mysql_version(host: str, port: int, user: str, password: str, db: str) -> str:
+    """
+    获取MySQL数据库版本
+    
+    Args:
+        host: 主机地址
+        port: 端口号
+        user: 用户名
+        password: 密码
+        db: 数据库名
+    
+    Returns:
+        版本号字符串
+    """
+    try:
+        conn = pymysql.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=db,
+            charset='utf8mb4',
+            cursorclass=pymysql.cursors.DictCursor
+        )
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT VERSION()")
+            version = cursor.fetchone()['VERSION()']
+        conn.close()
+        return version
+    except Exception as e:
+        st.error(f"获取MySQL版本失败: {str(e)}")
+        return "未知"
+
+
+def get_gaussdb_version(host: str, port: int, user: str, password: str, db: str) -> str:
+    """
+    获取GaussDB数据库版本
+    
+    Args:
+        host: 主机地址
+        port: 端口号
+        user: 用户名
+        password: 密码
+        db: 数据库名
+    
+    Returns:
+        版本号字符串
+    """
+    try:
+        conn = psycopg2.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            dbname=db
+        )
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT version()")
+            version = cursor.fetchone()[0]
+        conn.close()
+        return version
+    except Exception as e:
+        st.error(f"获取GaussDB版本失败: {str(e)}")
+        return "未知"
+
+
+def get_total_row_count(host: str, port: int, user: str, password: str, db: str, tables: List[str], is_mysql: bool) -> int:
+    """
+    统计所有表的总行数
+    
+    Args:
+        host: 主机地址
+        port: 端口号
+        user: 用户名
+        password: 密码
+        db: 数据库名
+        tables: 表名列表
+        is_mysql: 是否为MySQL数据库
+    
+    Returns:
+        总行数
+    """
+    total_count = 0
+    for table in tables:
+        total_count += get_table_row_count(host, port, user, password, db, table, is_mysql)
+    return total_count
+
+
 def main():
     """
     主函数
@@ -427,6 +520,26 @@ def main():
         else:
             st.error(message)
     
+    # 数据类型转换规则
+    with st.expander("数据类型转换规则"):
+        st.markdown("""
+        | MySQL类型 | GaussDB类型 | 说明 |
+        |----------|------------|------|
+        | datetime | timestamp | 日期时间类型 |
+        | int | integer | 整数类型 |
+        | bigint | bigint | 大整数类型 |
+        | float | float | 浮点数类型 |
+        | double | double precision | 双精度浮点数 |
+        | varchar | varchar | 可变长度字符串 |
+        | char | char | 固定长度字符串 |
+        | text | text | 文本类型 |
+        | longtext | text | 长文本类型 |
+        | boolean | boolean | 布尔类型 |
+        | tinyint(1) | boolean | 布尔类型（MySQL中常用tinyint(1)表示布尔值） |
+        | date | date | 日期类型 |
+        | time | time | 时间类型 |
+        """)
+    
     # 迁移按钮
     migrate_btn = st.button("开始迁移")
     
@@ -439,14 +552,44 @@ def main():
             st.error("请先确保两个数据库连接正常！")
             return
         
-        # 开始迁移
-        st.info("开始迁移数据...")
+        # 开始迁移前校验
+        st.info("开始迁移前校验...")
         
         # 获取源库表名
         tables = get_mysql_tables(mysql_host, mysql_port, mysql_user, mysql_password, mysql_db)
         if not tables:
             st.error("未找到源数据库中的表！")
             return
+        
+        # 获取数据库版本
+        mysql_version = get_mysql_version(mysql_host, mysql_port, mysql_user, mysql_password, mysql_db)
+        gauss_version = get_gaussdb_version(gauss_host, gauss_port, gauss_user, gauss_password, gauss_db)
+        
+        # 统计总行数
+        total_rows = get_total_row_count(mysql_host, mysql_port, mysql_user, mysql_password, mysql_db, tables, True)
+        
+        # 预估迁移时间（假设每1000条记录需要1秒）
+        estimated_time = total_rows / 1000
+        minutes = int(estimated_time // 60)
+        seconds = int(estimated_time % 60)
+        
+        # 显示校验结果
+        st.markdown(f"""
+        ### 迁移前校验结果
+        - **MySQL版本**: {mysql_version}
+        - **GaussDB版本**: {gauss_version}
+        - **要迁移的表数**: {len(tables)}
+        - **要迁移的总行数**: {total_rows}
+        - **预估迁移时间**: {minutes}分{seconds}秒
+        """)
+        
+        # 确认迁移
+        if not st.button("确认开始迁移"):
+            st.info("迁移已取消")
+            return
+        
+        # 开始迁移
+        st.info("开始迁移数据...")
         
         # 创建进度条和状态文本
         progress_bar = st.progress(0)
