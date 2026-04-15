@@ -79,10 +79,10 @@ def test_gaussdb_connection(host: str, port: int, user: str, password: str, db: 
     try:
         conn = psycopg2.connect(
             host=host,
-            port=port,
+            port=int(port),
             user=user,
             password=password,
-            dbname=db
+            database=db
         )
         conn.close()
         return True, "GaussDB连接成功！"
@@ -189,10 +189,10 @@ def create_gaussdb_table(host: str, port: int, user: str, password: str, db: str
     try:
         conn = psycopg2.connect(
             host=host,
-            port=port,
+            port=int(port),
             user=user,
             password=password,
-            dbname=db
+            database=db
         )
         
         # 构建CREATE TABLE语句
@@ -279,10 +279,10 @@ def migrate_data(host_mysql: str, port_mysql: int, user_mysql: str, password_mys
         # 连接GaussDB
         conn_gauss = psycopg2.connect(
             host=host_gauss,
-            port=port_gauss,
+            port=int(port_gauss),
             user=user_gauss,
             password=password_gauss,
-            dbname=db_gauss
+            database=db_gauss
         )
         
         # 获取表结构，用于构建插入语句
@@ -371,10 +371,10 @@ def get_table_row_count(host: str, port: int, user: str, password: str, db: str,
         else:
             conn = psycopg2.connect(
                 host=host,
-                port=port,
+                port=int(port),
                 user=user,
                 password=password,
-                dbname=db
+                database=db
             )
             with conn.cursor() as cursor:
                 cursor.execute(f"SELECT COUNT(*) FROM {table}")
@@ -436,10 +436,10 @@ def get_gaussdb_version(host: str, port: int, user: str, password: str, db: str)
     try:
         conn = psycopg2.connect(
             host=host,
-            port=port,
+            port=int(port),
             user=user,
             password=password,
-            dbname=db
+            database=db
         )
         with conn.cursor() as cursor:
             cursor.execute("SELECT version()")
