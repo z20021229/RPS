@@ -7,7 +7,7 @@
 
 import streamlit as st
 import pymysql
-import psycopg2
+from pg8000 import dbapi as psycopg2
 import pandas as pd
 import time
 from typing import Dict, List, Tuple
